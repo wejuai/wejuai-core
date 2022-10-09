@@ -1,0 +1,132 @@
+import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
+import com.bmuschko.gradle.docker.tasks.image.DockerPushImage
+import java.text.SimpleDateFormat
+
+//Must be on plugins{}
+buildscript {
+    repositories {
+        mavenLocal()
+        maven { url 'https://maven.aliyun.com/repository/central' }
+    }
+}
+
+plugins {
+    id 'java-library'
+    id 'org.springframework.boot' version '2.5.3'
+    id 'io.spring.dependency-management' version '1.0.11.RELEASE'
+    id 'com.bmuschko.docker-remote-api' version '7.1.0'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:2020.0.3"
+    }
+}
+
+group = 'com.wejuai'
+version = '1.0.0'
+sourceCompatibility = '11'
+
+repositories {
+    maven { url 'https://maven.aliyun.com/repository/central' }
+    mavenLocal()
+    maven {
+        url 'https://maven.pkg.github.com/EndOfMaster/maven-repo'
+        credentials {
+            username = project.findProperty("githubUser") ?: System.getenv("githubUser")
+            password = project.findProperty("githubKey") ?: System.getenv("githubKey")
+        }
+    }
+    maven {
+        url 'https://maven.pkg.github.com/wejuai/maven-repo'
+        credentials {
+            username = project.findProperty("githubUser") ?: System.getenv("githubUser")
+            password = project.findProperty("githubKey") ?: System.getenv("githubKey")
+        }
+    }
+}
+
+configurations.all {
+    //启用新标签
+    canBeResolved = true
+}
+
+dependencies {
+    implementation 'com.endofmaster:commons-id:1.0.2'
+    implementation 'com.endofmaster:commons-rest:1.0.4'
+    implementation 'com.endofmaster:commons-utils:1.0.6'
+    implementation 'com.endofmaster:commons-aliyun-oss:1.0.6'
+    implementation 'com.endofmaster:commons-tencent-ai:1.0.4'
+
+    implementation 'com.wejuai:wejuai-entity:1.0.7'
+    implementation 'com.wejuai:wejuai-dto:1.0.2'
+
+    implementation 'io.springfox:springfox-swagger2:3.0.0'
+    implementation 'io.springfox:springfox-swagger-ui:3.0.0'
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.cloud:spring-cloud-starter-config'
+    implementation 'org.springframework.cloud:spring-cloud-starter-bootstrap'
+
+    implementation 'mysql:mysql-connector-java'
+    implementation 'redis.clients:jedis'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+
+}
+
+[compileJava, compileTestJava, javadoc]*.options*.encoding = 'UTF-8'
+
+docker {
+    registryCredentials {
+        url = 'https://registry.cn-beijing.aliyuncs.com'
+        username = project.hasProperty('myDockerUser') ? project.property('myDockerUser') : '<myDockerUser>'
+        password = project.hasProperty('myDockerPassword') ? project.property('myDockerPassword') : '<myDockerPassword>'
+    }
+}
+
+ext {
+    dockerImageName = 'registry.cn-beijing.aliyuncs.com/wzm/wejuai-core:' + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date())
+}
+
+task dockerBuild(type: DockerBuildImage, dependsOn: bootJar) {
+    copy {
+        from("src/main/docker/Dockerfile")
+        into("build")
+    }
+    inputDir = file('build')
+    images.add(dockerImageName)
+}
+
+task dockerPush(type: DockerPushImage, dependsOn: dockerBuild) {
+    images.add(dockerImageName)
+}
+
+// 清除现有的lib目录
+task clearJar(type: Delete) {
+    delete "$buildDir/libs/lib"
+}
+
+// 将依赖包复制到lib目录
+task copyJar(type: Copy, dependsOn: clearJar) {
+    from configurations.implementation
+    into "$buildDir/libs/lib"
+}
+
+//重写spring bootJar
+bootJar {
+    archivesBaseName = project.name
+    archiveVersion = project.version
+    // 例外所有的jar和配置文件
+    excludes = ["*.jar"]
+    // lib目录的清除和复制任务
+    dependsOn copyJar
+    // 指定依赖包的路径
+    manifest {
+        attributes "Manifest-Version": 1.0,
+                'Class-Path': configurations.implementation.files.collect { "lib/$it.name" }.join(' ')
+    }
+}

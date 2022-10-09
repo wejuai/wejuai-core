@@ -1,0 +1,6 @@
+spring:
+  cloud:
+    config:
+      name: core
+      profile: ${SPRING_PROFILES_ACTIVE:dev}
+      uri: ${CONFIG_SERVER:https://{帐号}:{密码}@config.wejuai.com}
